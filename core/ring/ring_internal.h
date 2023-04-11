@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2023  Ammar Faizi <ammarfaizi2@gw.org>
+ * Copyright (C) 2023  Ammar Faizi <ammarfaizi2@gnuweeb.org>
+ * Copyright (C) 2023  Alviro Iskandar Setiawan <alviro.iskandar@gnuweeb.org>
  */
-
 #ifndef GNUWEEB__CORE__RING__RING_INTERNAL_H
 #define GNUWEEB__CORE__RING__RING_INTERNAL_H
 
