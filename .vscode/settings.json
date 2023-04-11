@@ -56,7 +56,10 @@
 		"tuple": "cpp",
 		"type_traits": "cpp",
 		"typeinfo": "cpp",
-		"curl.h": "c"
+		"curl.h": "c",
+		"chrono": "c",
+		"random": "c",
+		"algorithm": "c"
 	},
 	"C_Cpp.errorSquiggles": "disabled"
 }

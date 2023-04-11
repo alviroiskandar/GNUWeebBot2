@@ -6,6 +6,7 @@
 #ifndef GNUWEEB__COMMON_H
 #define GNUWEEB__COMMON_H
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -57,6 +58,14 @@
 #define __releases(x)
 #endif
 
+#ifndef READ_ONCE
+#define READ_ONCE(x)		(*(volatile typeof(x) *)&(x))
+#endif
+
+#ifndef WRITE_ONCE
+#define WRITE_ONCE(x, v)	(*(volatile typeof(x) *)&(x) = (v))
+#endif
+
 #ifndef smp_load_acquire
 #define smp_load_acquire(p) atomic_load_explicit(p, memory_order_acquire)
 #endif
@@ -65,13 +74,13 @@
 #define smp_store_release(p, v) atomic_store_explicit(p, v, memory_order_release)
 #endif
 
+static __always_inline void smp_mb(void)
+{
+	atomic_thread_fence(memory_order_seq_cst);
+}
+
 #include <gw/ring.h>
-struct tg_bot_ctx {
-	struct gw_ring		ring;
-	struct tg_updates	*updates;
-	struct tg_api_ctx	tctx;
-	int64_t			max_update_id;
-};
 #include <gw/print.h>
+
 
 #endif /* #ifndef GNUWEEB__COMMON_H */

@@ -8,4 +8,3 @@ OBJ_CC += \
 	$(BASE_DIR)/core/thread.o \
 	$(BASE_DIR)/core/workqueue.o
 
-include $(BASE_DIR)/core/ring/Makefile

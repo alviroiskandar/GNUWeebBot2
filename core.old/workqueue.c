@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2023  Ammar Faizi <ammarfaizi2@gw.org>
+ * Copyright (C) 2023  Ammar Faizi <ammarfaizi2@gnuweeb.org>
  */
 
 #include <stdatomic.h>
@@ -11,14 +11,40 @@
 #include <stdio.h>
 #include <errno.h>
 
-#include <gw/common.h>
 #include <gw/thread.h>
 #include <gw/workqueue.h>
 
+#ifdef __CHECKER__
+#define __must_hold(x)		__attribute__((__context__(x, 1, 1)))
+#define __acquires(x)		__attribute__((__context__(x, 0, 1)))
+#define __releases(x)		__attribute__((__context__(x, 1, 0)))
+#else
+#define __must_hold(x)
+#define __acquires(x)
+#define __releases(x)
+#endif
+
+#ifdef __GNUC__
+#define likely(x)		__builtin_expect(!!(x), 1)
+#define unlikely(x)		__builtin_expect(!!(x), 0)
+#else
+#define likely(x)		(!!(x))
+#define unlikely(x)		(!!(x))
+#endif
+
+#if 1
+#define pr_debug(FMT, ...)						\
+do {									\
+	printf("%s:%u " FMT "\n", __FILE__, __LINE__, ## __VA_ARGS__);	\
+} while (0)
+#else
+#define pr_debug(FMT, ...) do {} while (0)
+#endif
+
 struct work_struct {
-	void	(*func)(void *);
-	void	*arg;
-	void	(*deleter)(void *);
+	void			(*func)(void *);
+	void			*arg;
+	void			(*deleter)(void *);
 };
 
 struct worker_thread {
@@ -250,21 +276,6 @@ static int try_queue_work_locked(struct workqueue_struct *wq,
 	wq->work_list[wq->tail++ & wq->mask] = *work;
 	arm_worker(wq);
 	return 0;
-}
-
-int try_queue_work(struct workqueue_struct *wq, void (*func)(void *), void *arg,
-		   void (*deleter)(void *))
-{
-	struct work_struct work;
-	int ret;
-
-	work.func = func;
-	work.arg = arg;
-	work.deleter = deleter;
-	mutex_lock(&wq->work_list_lock);
-	ret = try_queue_work_locked(wq, &work);
-	mutex_unlock(&wq->work_list_lock);
-	return ret;
 }
 
 int queue_work(struct workqueue_struct *wq, void (*func)(void *), void *arg,

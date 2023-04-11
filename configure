@@ -312,10 +312,6 @@ if test "${use_sanitize}" = "yes"; then
 	LDFLAGS="${LDFLAGS} -fsanitize=address -fsanitize=undefined";
 fi;
 
-if test "${use_cpp_thread}" = "yes"; then
-	add_config "CONFIG_CPP_THREAD";
-fi;
-
 add_config "CONFIG_MODULE_PING";
 
 add_make_var "CC" "${cc}";
