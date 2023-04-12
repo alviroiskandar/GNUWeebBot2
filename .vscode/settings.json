@@ -59,7 +59,9 @@
 		"curl.h": "c",
 		"chrono": "c",
 		"random": "c",
-		"algorithm": "c"
+		"algorithm": "c",
+		"threads.h": "c",
+		"thread-shared-types.h": "c"
 	},
 	"C_Cpp.errorSquiggles": "disabled"
 }

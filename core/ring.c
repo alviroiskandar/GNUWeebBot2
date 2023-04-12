@@ -40,23 +40,29 @@ int gw_ring_queue_init(struct gw_ring *ring, uint32_t entries)
 	ring->sqes = calloc(ring->sq_mask + 1u, sizeof(*ring->sqes));
 	if (!ring->sqes)
 		return -ENOMEM;
+
 	ring->cqes = calloc(ring->cq_mask + 1u, sizeof(*ring->cqes));
 	if (!ring->cqes) {
 		ret = -ENOMEM;
 		goto out_free_sqes;
 	}
+
 	ret = alloc_workqueue(&ring->io_wq, &wq_attr);
 	if (ret)
 		goto out_free_cqes;
+
 	ret = mutex_init(&ring->sq_lock);
 	if (ret)
 		goto out_free_wq;
+
 	ret = mutex_init(&ring->cq_lock);
 	if (ret)
 		goto out_free_sq_lock;
+
 	ret = cond_init(&ring->post_cqe_cond);
 	if (ret)
 		goto out_free_cq_lock;
+
 	ret = cond_init(&ring->wait_cqe_cond);
 	if (ret)
 		goto out_free_post_cqe_cond;
@@ -84,12 +90,16 @@ void gw_ring_queue_destroy(struct gw_ring *ring)
 	ring->should_stop = true;
 
 	mutex_lock(&ring->cq_lock);
+
 	if (ring->post_cqe_cond_n)
 		cond_broadcast_n(&ring->post_cqe_cond, ring->post_cqe_cond_n);
+
 	if (ring->wait_cqe_cond_n)
 		cond_broadcast_n(&ring->wait_cqe_cond, ring->wait_cqe_cond_n);
+
 	mutex_unlock(&ring->cq_lock);
 
+	wait_all_work_done(ring->io_wq);
 	destroy_workqueue(ring->io_wq);
 	free(ring->sqes);
 	free(ring->cqes);
@@ -136,21 +146,18 @@ static void gw_iowq_post_cqe(void *data)
 	while (1) {
 		if (gw_ring_cq_left(ring) > 0)
 			break;
+
 		if (unlikely(ring->should_stop)) {
 			mutex_unlock(&ring->cq_lock);
 			return;
 		}
+
 		ring->post_cqe_cond_n++;
 		cond_wait(&ring->post_cqe_cond, &ring->cq_lock);
 		ring->post_cqe_cond_n--;
 	}
 	__gw_post_cqe(ring, d->res, d->user_data);
 	mutex_unlock(&ring->cq_lock);
-}
-
-static void gw_iowq_deleter_post_cqe(void *data)
-{
-	free(data);
 }
 
 /*
@@ -171,9 +178,7 @@ static bool gw_post_cqe_via_wq(struct gw_ring *ring, int64_t res,
 	data->res = res;
 	data->user_data = user_data;
 	data->ring = ring;
-	ret = try_queue_work(ring->io_wq, gw_iowq_post_cqe, data,
-			     gw_iowq_deleter_post_cqe);
-
+	ret = try_queue_work(ring->io_wq, gw_iowq_post_cqe, data, free);
 	if (unlikely(ret != 0)) {
 		free(data);
 		return false;
@@ -187,12 +192,14 @@ bool gw_post_cqe(struct gw_ring *ring, int64_t res, uint64_t user_data)
 	bool ret;
 
 	mutex_lock(&ring->cq_lock);
+
 	if (unlikely(gw_ring_cq_left(ring) == 0)) {
 		ret = gw_post_cqe_via_wq(ring, res, user_data);
 	} else {
 		__gw_post_cqe(ring, res, user_data);
 		ret = true;
 	}
+
 	mutex_unlock(&ring->cq_lock);
 	return ret;
 }
@@ -230,12 +237,15 @@ static int __gw_ring_submit(struct gw_ring *ring)
 
 	head = ring->sq_head;
 	tail = ring->sq_tail;
+
 	while (head != tail) {
 		if (unlikely(ring->should_stop))
 			return -EOWNERDEAD;
+
 		if (gw_issue_sqe(ring, &ring->sqes[head++ & ring->sq_mask]))
 			ret++;
 	}
+
 	ring->sq_head = head;
 	return ret;
 }
@@ -255,8 +265,10 @@ struct gw_ring_sqe *gw_ring_get_sqe(struct gw_ring *ring)
 	struct gw_ring_sqe *sqe = NULL;
 
 	mutex_lock(&ring->sq_lock);
+
 	if (likely(gw_ring_sq_left(ring) > 0))
 		sqe = &ring->sqes[ring->sq_tail++ & ring->sq_mask];
+
 	mutex_unlock(&ring->sq_lock);
 	return sqe;
 }
@@ -266,8 +278,10 @@ struct gw_ring_sqe *gw_ring_get_sqe_nf(struct gw_ring *ring)
 	struct gw_ring_sqe *sqe;
 
 	mutex_lock(&ring->sq_lock);
+
 	if (unlikely(gw_ring_sq_left(ring) == 0))
 		__gw_ring_submit(ring);
+
 	sqe = &ring->sqes[ring->sq_tail++ & ring->sq_mask];
 	mutex_unlock(&ring->sq_lock);
 	return sqe;
@@ -280,8 +294,10 @@ static int __gw_ring_wait_cqe_nr(struct gw_ring *ring, struct gw_ring_cqe **cqe,
 	while (1) {
 		if (unlikely(ring->should_stop))
 			return -EOWNERDEAD;
+
 		if (gw_ring_cq_ready(ring) >= nr)
 			break;
+
 		ring->wait_cqe_cond_n++;
 		cond_wait(&ring->wait_cqe_cond, &ring->cq_lock);
 		ring->wait_cqe_cond_n--;
@@ -316,6 +332,7 @@ int gw_ring_submit_and_wait(struct gw_ring *ring, uint32_t wait_nr)
 	mutex_lock(&ring->sq_lock);
 	ret = __gw_ring_submit(ring);
 	mutex_unlock(&ring->sq_lock);
+
 	if (unlikely(ret < 0))
 		return ret;
 
@@ -328,8 +345,10 @@ int gw_ring_submit_and_wait(struct gw_ring *ring, uint32_t wait_nr)
 void gw_ring_cq_advance(struct gw_ring *ring, uint32_t n)
 {
 	mutex_lock(&ring->cq_lock);
+
 	ring->cq_head += n;
 	if (ring->post_cqe_cond_n)
 		cond_broadcast_n(&ring->post_cqe_cond, ring->post_cqe_cond_n);
+
 	mutex_unlock(&ring->cq_lock);
 }

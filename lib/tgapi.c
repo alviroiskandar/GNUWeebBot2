@@ -531,8 +531,10 @@ int tgapi_parse_updates_len_max(struct tg_updates **updates_p, const char *json,
 
 out:
 	json_object_put(jobj);
-	if (likely(!ret))
+	if (likely(!ret)) {
 		*updates_p = updates;
+		printf("%s\n", __func__);
+	}
 	return ret;
 
 out_clean:
@@ -546,6 +548,7 @@ void tgapi_free_updates(struct tg_updates *updates)
 {
 	size_t i;
 
+	printf("%s\n", __func__);
 	for (i = 0; i < updates->len; i++)
 		tgapi_free_update(&updates->updates[i]);
 	free(updates);
@@ -614,6 +617,7 @@ static int curl_http_get(const char *url, struct curl_data *data)
 
 	res = curl_easy_perform(ch);
 	if (res != CURLE_OK) {
+		gw_curl_thread_handle_error();
 		fprintf(stderr, "curl_easy_perform() to URL %s failed: %s\n",
 			url, curl_easy_strerror(res));
 		return -1;

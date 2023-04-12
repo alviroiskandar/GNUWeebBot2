@@ -6,6 +6,8 @@
 #include <gw/lib/curl.h>
 #include <gw/common.h>
 #include <gw/ring.h>
+
+#include <sys/signal.h>
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
@@ -16,6 +18,7 @@ struct gw_bot_ctx {
 	struct tg_api_ctx	tctx;
 	struct tg_updates	*updates;
 	uint64_t		max_update_id;
+	int			signal;
 };
 
 enum {
@@ -27,10 +30,51 @@ enum {
 	CLEAR_EV_MASK	= ~GET_EV_MASK
 };
 
+static struct gw_bot_ctx *g_ctx;
+
 static int init_tg_api_ctx(struct tg_api_ctx *ctx)
 {
 	ctx->token = "308645660:AAFlEKTBWjuwTDiGvyqAaDMuwBXLoiQPijQ";
 	return 0;
+}
+
+static void signal_handler(int sig)
+{
+	if (g_ctx) {
+		g_ctx->should_stop = true;
+		g_ctx->signal = sig;
+		putchar('\n');
+	}
+}
+
+static int init_signal_handlers(struct gw_bot_ctx *ctx)
+{
+	struct sigaction sa;
+	int ret;
+
+	g_ctx = ctx;
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_handler = signal_handler;
+	ret = sigaction(SIGINT, &sa, NULL);
+	if (unlikely(ret))
+		goto out_err;
+	ret = sigaction(SIGTERM, &sa, NULL);
+	if (unlikely(ret))
+		goto out_err;
+	ret = sigaction(SIGHUP, &sa, NULL);
+	if (unlikely(ret))
+		goto out_err;
+	sa.sa_handler = SIG_IGN;
+	ret = sigaction(SIGPIPE, &sa, NULL);
+	if (unlikely(ret))
+		goto out_err;
+
+	return 0;
+
+out_err:
+	ret = -errno;
+	perror("sigaction");
+	return ret;
 }
 
 static void prep_tg_get_updates(struct gw_bot_ctx *ctx)
@@ -69,13 +113,13 @@ static int process_tg_update(struct gw_bot_ctx *ctx, struct tg_update *update)
 
 static int process_tg_updates(struct gw_bot_ctx *ctx, int64_t res)
 {
+	int ret = (int)res;
 	uint32_t i;
-	int ret;
 
-	if (unlikely(res < 0)) {
-		pr_err("Failed to get updates: %s\n", strerror((int)-res));
-		return (int)res;
-	}
+	// if (unlikely(ret < 0)) {
+	// 	pr_err("Failed to get updates: %s\n", strerror((int)-res));
+	// 	return (int)ret;
+	// }
 
 	if (unlikely(!ctx->updates))
 		goto out;
@@ -88,11 +132,16 @@ static int process_tg_updates(struct gw_bot_ctx *ctx, int64_t res)
 
 		ret = process_tg_update(ctx, update);
 		if (unlikely(ret))
-			return ret;
+			break;
 	}
 
+	tgapi_free_updates(ctx->updates);
+	ctx->updates = NULL;
+
 out:
-	prep_tg_get_updates(ctx);
+	if (likely(!ret && !ctx->should_stop))
+		prep_tg_get_updates(ctx);
+
 	return 0;
 }
 
@@ -137,7 +186,6 @@ static int process_events(struct gw_bot_ctx *ctx)
 
 static int run_event_loop(struct gw_bot_ctx *ctx)
 {
-	struct gw_ring_cqe *cqe;
 	int ret = 0;
 
 	prep_tg_get_updates(ctx);
@@ -150,26 +198,36 @@ static int run_event_loop(struct gw_bot_ctx *ctx)
 	return ret;
 }
 
-int main(int argc, char *argv[])
+int main(void)
 {
 	struct gw_bot_ctx ctx;
 	int ret;
 
+	memset(&ctx, 0, sizeof(ctx));
 	ret = init_tg_api_ctx(&ctx.tctx);
 	if (ret)
 		return ret;
-	ret = gw_ring_queue_init(&ctx.ring, 4096);
+	ret = init_signal_handlers(&ctx);
 	if (ret)
 		return ret;
 	ret = gw_curl_global_init(0);
 	if (ret)
-		goto out;
+		return ret;
+	ret = gw_print_global_init();
+	if (ret)
+		goto out_curl;
+	ret = gw_ring_queue_init(&ctx.ring, 4096);
+	if (ret)
+		goto out_print;
 
-	ctx.updates = NULL;
-	ctx.should_stop = false;
 	ret = run_event_loop(&ctx);
-
-out:
 	gw_ring_queue_destroy(&ctx.ring);
+	if (ctx.updates)
+		tgapi_free_updates(ctx.updates);
+
+out_print:
+	gw_print_global_destroy();
+out_curl:
+	gw_curl_global_cleanup();
 	return ret;
 }

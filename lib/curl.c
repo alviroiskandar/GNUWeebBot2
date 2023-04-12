@@ -109,6 +109,36 @@ void *gw_curl_thread_init(void)
 		}
 	}
 	cd->handles[cd->nr_handles++] = ret;
+	current_thread_curl_handle = ret;
 	mutex_unlock(&cd->mutex);
 	return ret;
+}
+
+/*
+ * If the curl_easy_perform() returns an error, we have to
+ * reinitialize the curl handle.
+ */
+void gw_curl_thread_handle_error(void)
+{
+	struct curl_handle_list *cd = g_gw_curl_data;
+	CURL *cur = current_thread_curl_handle;
+	size_t i;
+
+	mutex_lock(&cd->mutex);
+	for (i = 0; i < cd->nr_handles; i++) {
+		if (cd->handles[i] != cur)
+			continue;
+
+		curl_easy_cleanup(cur);
+
+		/*
+		 * Ignore the curl_easy_cleanup() failure. If it fails,
+		 * the thread will just assume it's ENOMEM later.
+		 */
+		printf("Reinitializing curl...\n");
+		cd->handles[i] = curl_easy_init();
+		current_thread_curl_handle = cd->handles[i];
+		break;
+	}
+	mutex_unlock(&cd->mutex);
 }

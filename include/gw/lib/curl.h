@@ -9,5 +9,6 @@
 int gw_curl_global_init(long flags);
 void gw_curl_global_cleanup(void);
 void *gw_curl_thread_init(void);
+void gw_curl_thread_handle_error(void);
 
 #endif /* #ifndef GNUWEEB__LIB__CURL_H */
